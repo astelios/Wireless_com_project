@@ -74,6 +74,24 @@ struct minstrel_ht_sta {
 	unsigned int total_packets;
 	unsigned int sample_packets;
 
+//******************************* L3S *******************************//
+	// flags
+	bool state; 	// True: TX State, False: Probe State
+	bool recovery; 	// True: Recovery was Called
+
+	// short term stats
+	unsigned int consecutive_successes;
+	unsigned int consecutive_failures;
+	unsigned int consecutive_retries;
+
+	// long term stats
+	bool first_probe; 		// True: first period, False: second period
+	bool probe_right;		// ??
+	unsigned int probe_interval;	
+	unsigned int tx_interval;	// ??
+//******************************* L3S *******************************//
+
+
 	/* tx flags to add for frames for this sta */
 	u32 tx_flags;
 
