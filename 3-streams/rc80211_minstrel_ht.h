@@ -89,6 +89,10 @@ struct minstrel_ht_sta {
 	bool probe_right;		// ??
 	unsigned int probe_interval;	
 	unsigned int tx_interval;	// ??
+	
+	
+	unsigned int tx_period_start;	// Tx timer	
+	unsigned int probe_period_start;// Probe timer
 //******************************* L3S *******************************//
 
 
