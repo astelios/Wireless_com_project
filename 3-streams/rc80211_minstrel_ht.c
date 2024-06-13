@@ -236,6 +236,13 @@ static u8 sample_table[SAMPLE_COLUMNS][MCS_GROUP_RATES] __read_mostly;
 static void
 minstrel_ht_update_rates(struct minstrel_priv *mp, struct minstrel_ht_sta *mi, struct MRRS_info retry_series);
 
+// Custom Functions
+// void short_term_stats_reset(struct minstrel_ht_sta *mi);
+void L3S_update_rate(struct minstrel_priv *mp, struct minstrel_ht_sta *mi);
+void L3S_recovery(struct minstrel_priv *mp, struct minstrel_ht_sta *mi);
+static void minstrel_ht_set_rate(struct minstrel_priv *mp, struct minstrel_ht_sta *mi,
+                     struct ieee80211_sta_rates *ratetbl, int offset, int index, int retries);
+
 /*
  * Some VHT MCSes are invalid (when Ndbps / Nes is not an integer)
  * e.g for MCS9@20MHzx1Nss: Ndbps=8x52*(5/6) Nes=1
@@ -724,10 +731,11 @@ minstrel_aggr_check(struct ieee80211_sta *pubsta, struct sk_buff *skb)
 	ieee80211_start_tx_ba_session(pubsta, tid, 0);
 }
 
+
 // Function corresponds to update_rate() function mentioned in the paper
 void L3S_update_rate(struct minstrel_priv *mp, struct minstrel_ht_sta *mi){
 	int old_group;
-        int new_group;
+    int new_group;
 	int old_mcs_index;
 	int new_mcs_index;
 	
@@ -776,7 +784,6 @@ void L3S_recovery(struct minstrel_priv *mp, struct minstrel_ht_sta *mi){
 			}
 			else {
 				mi->max_tp_rate[i] = mi->max_tp_rate[i] - MCS_GROUP_RATES;
-		
 			}
 		}	
 		else {
@@ -1483,6 +1490,7 @@ minstrel_ht_update_caps(void *priv, struct ieee80211_supported_band *sband,
 	struct ieee80211_mcs_info *mcs = &sta->ht_cap.mcs;
 	u16 ht_cap = sta->ht_cap.cap;
 	struct ieee80211_sta_vht_cap *vht_cap = &sta->vht_cap;
+	struct MRRS_info retry_series;
 	int use_vht;
 	int n_supported = 0;
 	int ack_dur;
@@ -1616,7 +1624,7 @@ minstrel_ht_update_caps(void *priv, struct ieee80211_supported_band *sband,
 
 	/* create an initial rate table with the lowest supported rates */
 	minstrel_ht_update_stats(mp, mi);
-	minstrel_ht_update_rates(mp, mi);
+	minstrel_ht_update_rates(mp, mi, retry_series);
 
 	return;
 
