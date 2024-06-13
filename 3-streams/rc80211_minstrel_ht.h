@@ -29,6 +29,10 @@
 
 #define MCS_GROUP_RATES		10
 
+//******************************* L3S *******************************//
+#define L3S_DEBUG
+//******************************* L3S *******************************//
+
 struct mcs_group {
 	u16 flags;
 	u8 streams;
@@ -85,14 +89,14 @@ struct minstrel_ht_sta {
 	unsigned int consecutive_retries;
 
 	// long term stats
-	bool first_probe; 		// True: first period, False: second period
-	bool probe_right;		// ??
+	bool first_probe; 			// True: first period, False: second period
+	bool probe_right;			// ??
 	unsigned int probe_interval;	
 	unsigned int tx_interval;	// ??
 	
 	
-	unsigned int tx_period_start;	// Tx timer	
-	unsigned int probe_period_start;// Probe timer
+	unsigned int tx_timer_start;	// Tx timer	
+	unsigned int probe_timer_start;	// Probe timer
 //******************************* L3S *******************************//
 
 
@@ -115,6 +119,11 @@ struct minstrel_ht_sta {
 
 	/* MCS rate group info and statistics */
 	struct minstrel_mcs_group_data groups[MINSTREL_GROUPS_NB];
+};
+
+struct MRRS_info {
+	int try1, try2, try3;
+	int rix1, rix2, rix3;
 };
 
 struct minstrel_ht_sta_priv {
