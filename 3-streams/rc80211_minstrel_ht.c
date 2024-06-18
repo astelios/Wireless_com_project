@@ -684,6 +684,7 @@ minstrel_set_next_sample_idx(struct minstrel_ht_sta *mi)
 	}
 }
 
+/*
 static void
 minstrel_downgrade_rate(struct minstrel_ht_sta *mi, u16 *idx, bool primary)
 {
@@ -707,6 +708,7 @@ minstrel_downgrade_rate(struct minstrel_ht_sta *mi, u16 *idx, bool primary)
 		break;
 	}
 }
+*/
 
 static void
 minstrel_aggr_check(struct ieee80211_sta *pubsta, struct sk_buff *skb)
@@ -774,7 +776,7 @@ void L3S_update_rate(struct minstrel_priv *mp, struct minstrel_ht_sta *mi){
 //Recovery
 void L3S_recovery(struct minstrel_priv *mp, struct minstrel_ht_sta *mi){
 	int i = 0;
-	struct MRRS_info retry_series;
+	// struct MRRS_info retry_series; // JDA moved to 797 WARNING needs fix
 
 	mi->recovery = true;
 	for(i = 0; i < MAX_THR_RATES - 1; i++) {
@@ -792,14 +794,14 @@ void L3S_recovery(struct minstrel_priv *mp, struct minstrel_ht_sta *mi){
 	}
 
 	// Tries
-	retry_series = {
-		.rix1 = mi->max_tp_rate[0]
-		.rix2 = mi->max_tp_rate[1]
-		.rix3 = mi->max_tp_rate[2]
-		.try1 = 2
-		.try2 = 2
+	struct MRRS_info retry_series = { // JDA added ", "
+		.rix1 = mi->max_tp_rate[0],
+		.rix2 = mi->max_tp_rate[1],
+		.rix3 = mi->max_tp_rate[2],
+		.try1 = 2,
+		.try2 = 2,
 		.try3 = 2
-	}
+	};
 
 	
 	minstrel_ht_update_rates(mp, mi, retry_series);
@@ -868,11 +870,11 @@ minstrel_ht_tx_status(void *priv, struct ieee80211_supported_band *sband,
 	struct minstrel_ht_sta_priv *msp = priv_sta;
 	struct minstrel_ht_sta *mi = &msp->ht;
 	struct ieee80211_tx_rate *ar = info->status.rates;
-	struct minstrel_rate_stats *rate, *rate2;
+	struct minstrel_rate_stats *rate/*, *rate2*/;
 	struct minstrel_priv *mp = priv;
 	long long int current_time;
 	struct MRRS_info retry_series;
-	bool last, update = false;
+	bool last/*, update = false*/;	// JDA unused
 	int tx_rate, mcs_index;
 	int i;
 
@@ -942,33 +944,33 @@ minstrel_ht_tx_status(void *priv, struct ieee80211_supported_band *sband,
 	current_time = ktime_to_ms(ktime_get());
 
 	// TX state and TX period just started 
-	if(mi->state && !mi->tx_period_start){
-		mi->tx_period_start = current_time;
+	if(mi->state && !mi->tx_timer_start){
+		mi->tx_timer_start = current_time;
 	}
 	
 	// TX state and TX period finished, thus move to Probe state	
-	if(mi->state && (current_time - mi->tx_period_start) > mi->probe_interval){
+	if(mi->state && (current_time - mi->tx_timer_start) > mi->probe_interval){
 		mi->state = false;			
 		
 		// Reset TX period
-		mi->tx_period_start = 0;
+		mi->tx_timer_start = 0;
 	}
 	
 	// Probe state and Probe period just started
-	if(!mi->state && !mi->probe_period_start){
-		mi->probe_period_start = current_time;
+	if(!mi->state && !mi->probe_timer_start){
+		mi->probe_timer_start = current_time;
 
 		// Probe period just started, thus first probe flag is valid
 		mi->first_probe = false;
 	}
 	
 	// Probe state and Probe period fininshed, thus move to TX state
-	if(!mi->state && (current_time - mi->probe_period_start) > mi->tx_interval){	
+	if(!mi->state && (current_time - mi->probe_timer_start) > mi->tx_interval){	
 		// Probe state and Probe period finished, thus move to TX state
 		mi->state = true;
 
 		// Reset Probe period
-		mi->probe_period_start = 0;	
+		mi->probe_timer_start = 0;	
 	}
 
 	// *********************** TX State *********************** //
@@ -1100,9 +1102,9 @@ minstrel_ht_tx_status(void *priv, struct ieee80211_supported_band *sband,
 
 
 #ifdef L3S_DEBUG
-	printk("rix1: %d\n", rix1);
-	printk("rix2: %d\n", rix2);
-	printk("rix3: %d\n", rix3);
+	printk("rix1: %d\n", retry_series.rix1);
+	printk("rix2: %d\n", retry_series.rix2);
+	printk("rix3: %d\n", retry_series.rix3);
 #endif
 	// ??????????????
 	if(retry_series.rix1 < 0 || retry_series.rix2 < 0 || retry_series.rix3 < 0){
