@@ -237,7 +237,7 @@ static void
 minstrel_ht_update_rates(struct minstrel_priv *mp, struct minstrel_ht_sta *mi, struct MRRS_info retry_series);
 
 // Custom Functions
-// void short_term_stats_reset(struct minstrel_ht_sta *mi);
+void short_term_stats_reset(struct minstrel_ht_sta *mi);
 void L3S_update_rate(struct minstrel_priv *mp, struct minstrel_ht_sta *mi);
 void L3S_recovery(struct minstrel_priv *mp, struct minstrel_ht_sta *mi);
 static void minstrel_ht_set_rate(struct minstrel_priv *mp, struct minstrel_ht_sta *mi,
@@ -803,6 +803,12 @@ void L3S_recovery(struct minstrel_priv *mp, struct minstrel_ht_sta *mi){
 
 	
 	minstrel_ht_update_rates(mp, mi, retry_series);
+}
+
+void short_term_stats_reset(struct minstrel_ht_sta *mi){
+	mi->consecutive_successes	= 0;
+	mi->consecutive_failures 	= 0;
+	mi->consecutive_retries 	= 0;
 }
 
 // Function corresponds to rate_statistics() function mentioned in the paper
@@ -1624,7 +1630,20 @@ minstrel_ht_update_caps(void *priv, struct ieee80211_supported_band *sband,
 
 	/* create an initial rate table with the lowest supported rates */
 	minstrel_ht_update_stats(mp, mi);
+
 	minstrel_ht_update_rates(mp, mi, retry_series);
+
+		
+	// Initialize short term statistics
+	short_term_stats_reset(mi);
+
+	// Initialize long term statistics
+	mi->state = true;
+	mi->probe_right = true;
+	mi->probe_interval 	= 60;	//ms
+	mi->tx_interval 	= 20;	//ms 
+	mi->tx_timer_start 	= 0;	//ms
+	mi->probe_timer_start 	= 0; 	//ms
 
 	return;
 
