@@ -237,7 +237,7 @@ static void
 minstrel_ht_update_rates(struct minstrel_priv *mp, struct minstrel_ht_sta *mi, struct MRRS_info retry_series);
 
 // Custom Functions
-void short_term_stats_reset(struct minstrel_ht_sta *mi);
+void L3S_ST_stats_reset(struct minstrel_ht_sta *mi);
 void L3S_update_rate(struct minstrel_priv *mp, struct minstrel_ht_sta *mi);
 void L3S_recovery(struct minstrel_priv *mp, struct minstrel_ht_sta *mi);
 static void minstrel_ht_set_rate(struct minstrel_priv *mp, struct minstrel_ht_sta *mi,
@@ -740,7 +740,7 @@ void L3S_update_rate(struct minstrel_priv *mp, struct minstrel_ht_sta *mi){
 	int new_mcs_index;
 	
 	// Reset consecutive successes and failures
-	short_term_stats_reset(mi);
+	L3S_ST_stats_reset(mi);
 	
 	// Return to not lose changes due to minstrel_ht_update_stats()
 	if(mi->recovery){
@@ -805,10 +805,8 @@ void L3S_recovery(struct minstrel_priv *mp, struct minstrel_ht_sta *mi){
 	minstrel_ht_update_rates(mp, mi, retry_series);
 }
 
-void short_term_stats_reset(struct minstrel_ht_sta *mi){
-	mi->consecutive_successes	= 0;
-	mi->consecutive_failures 	= 0;
-	mi->consecutive_retries 	= 0;
+void L3S_ST_stats_reset(struct minstrel_ht_sta *mi){
+	mi->consecutive_successes = mi->consecutive_failures = mi->consecutive_retries = 0;
 }
 
 // Function corresponds to rate_statistics() function mentioned in the paper
@@ -859,6 +857,7 @@ void L3S_rate_statistics(struct minstrel_priv *mp, struct minstrel_ht_sta *mi){
 	// the iteration of statistics (the for loop above this function
 	// call) with this particular function.
 	mi->consecutive_retries = 0;
+	mi->consecutive_failures = 0;
 }
 
 static void
@@ -874,6 +873,7 @@ minstrel_ht_tx_status(void *priv, struct ieee80211_supported_band *sband,
 	long long int current_time;
 	struct MRRS_info retry_series;
 	bool last, update = false;
+	int tx_rate, mcs_index;
 	int i;
 
 	if (!msp->is_ht)
@@ -906,6 +906,9 @@ minstrel_ht_tx_status(void *priv, struct ieee80211_supported_band *sband,
 		mi->sample_packets += info->status.ampdu_len;
 
 	last = !minstrel_ht_txstat_valid(mp, &ar[0]);
+	
+	// reset consecutive tries
+	mi->consecutive_retries = 0;
 	for (i = 0; !last; i++) {
 		last = (i == IEEE80211_TX_MAX_RATES - 1) ||
 		       !minstrel_ht_txstat_valid(mp, &ar[i + 1]);
@@ -917,18 +920,22 @@ minstrel_ht_tx_status(void *priv, struct ieee80211_supported_band *sband,
 
 		// Increment consecutive_retries
 		mi->consecutive_retries = mi->consecutive_retries + ar[i].count; 
-
+		
+		/*
+		The count field in the ieee80211_tx_rate structure represents the number of times a particular rate is attempted for a 
+		given frame transmission before moving on to the next rate in the rate set or retrying with the same rate. 
+		This is crucial for understanding and managing how transmission rates are adapted in varying conditions to optimize network performance.
+		*/
 		rate->attempts += ar[i].count * info->status.ampdu_len;
 	}
 
-	// Rate short term statistics (corresponds to rate_statistics() from the given paper)
 	L3S_rate_statistics(mp, mi);
 
 	// Reset consecutive successes and failures (correspond to update_rate())
 	// Reseting these stats only when failures are detected since the successes 
 	// are accumulated contrary to failires, which are computed once.
 	if(!mi->consecutive_successes){
-		reset_stats(mp, mi);
+		L3S_update_rate(mp, mi); // L3S_update_rate
 	}
 
 	// Enter probe state
@@ -964,9 +971,6 @@ minstrel_ht_tx_status(void *priv, struct ieee80211_supported_band *sband,
 		mi->probe_period_start = 0;	
 	}
 
-
-	rix1 = rix2 = rix3 = -1;
-
 	// *********************** TX State *********************** //
 	if(mi->state){
 
@@ -975,10 +979,10 @@ minstrel_ht_tx_status(void *priv, struct ieee80211_supported_band *sband,
 #endif
 	
 		retry_series.rix1 = mi->max_tp_rate[0]; 	// tx_rate 
-		retry_series.rix2 = mi->max_tp_rate[1]; 	// down_rate()
-		retry_series.rix3 = mi->max_tp_rate[2]; 	// down_rate()
 		retry_series.try1 = 2;
+		retry_series.rix2 = mi->max_tp_rate[1]; 	// down_rate()
 		retry_series.try2 = 2;
+		retry_series.rix3 = mi->max_tp_rate[2]; 	// down_rate()
 		retry_series.try3 = 2;
 	}	   
 	
@@ -1000,26 +1004,26 @@ minstrel_ht_tx_status(void *priv, struct ieee80211_supported_band *sband,
 
 			if(mcs_index > 0 && mcs_index < 7){
 				retry_series.rix1 = mi->max_tp_rate[0] + 1; 	// up_probe()
-				retry_series.rix2 = mi->max_tp_rate[0];	// tx_rate
-				retry_series.rix3 = mi->max_tp_rate[0] - 1; 	// down_probe()
 				retry_series.try1 = 2;
+				retry_series.rix2 = mi->max_tp_rate[0];	// tx_rate
 				retry_series.try2 = 2;
+				retry_series.rix3 = mi->max_tp_rate[0] - 1; 	// down_probe()
 				retry_series.try3 = 2;
 			}
 			else if(!mcs_index){
 				retry_series.rix1 = mi->max_tp_rate[0] + 1;
-				retry_series.rix2 = mi->max_tp_rate[0];
-				retry_series.rix3 = mi->max_tp_rate[1];
 				retry_series.try1 = 2;
+				retry_series.rix2 = mi->max_tp_rate[0];
 				retry_series.try2 = 2;
+				retry_series.rix3 = mi->max_tp_rate[1];
 				retry_series.try3 = 2;
 			}
 			else {
 				retry_series.rix1 = mi->max_tp_rate[0];
-				retry_series.rix2 = mi->max_tp_rate[0] - 1;
-				retry_series.rix3 = mi->max_tp_rate[0] - 2;
 				retry_series.try1 = 2;
+				retry_series.rix2 = mi->max_tp_rate[0] - 1;
 				retry_series.try2 = 2;
+				retry_series.rix3 = mi->max_tp_rate[0] - 2;
 				retry_series.try3 = 2;
 			}
 
@@ -1047,18 +1051,18 @@ minstrel_ht_tx_status(void *priv, struct ieee80211_supported_band *sband,
 			if ((tx_rate >= 0 && tx_rate <= 7) || (tx_rate >= 10 && tx_rate <= 17 && mi->probe_right)){
 				if (mcs_index > 0){
 					retry_series.rix1 = mi->max_tp_rate[0] + MCS_GROUP_RATES; 		// right_probe()
-					retry_series.rix2 = mi->max_tp_rate[0] + MCS_GROUP_RATES - 1; 	// right_down_probe()
-					retry_series.rix3 = mi->max_tp_rate[0];				// tx_rate
 					retry_series.try1 = 2;
+					retry_series.rix2 = mi->max_tp_rate[0] + MCS_GROUP_RATES - 1; 	// right_down_probe()
 					retry_series.try2 = 2;
+					retry_series.rix3 = mi->max_tp_rate[0];				// tx_rate
 					retry_series.try3 = 2;
 				}
 				else if (!mcs_index){
 					retry_series.rix1 = mi->max_tp_rate[0] + MCS_GROUP_RATES; 
-					retry_series.rix2 = mi->max_tp_rate[0] + MCS_GROUP_RATES - 3; 
-					retry_series.rix3 = mi->max_tp_rate[0];
 					retry_series.try1 = 2;
+					retry_series.rix2 = mi->max_tp_rate[0] + MCS_GROUP_RATES - 3; 
 					retry_series.try2 = 2;
+					retry_series.rix3 = mi->max_tp_rate[0];
 					retry_series.try3 = 2;
 				}
 
@@ -1071,18 +1075,18 @@ minstrel_ht_tx_status(void *priv, struct ieee80211_supported_band *sband,
 		       	else if ((tx_rate >= 20 && tx_rate <= 27) || (tx_rate >=10 && tx_rate <=17 && !mi->probe_right)){
 				if (mcs_index < 7){
 					retry_series.rix1 = mi->max_tp_rate[0];
-					retry_series.rix2 = mi->max_tp_rate[0] - (MCS_GROUP_RATES - 1); 	// left_up_probe()
-					retry_series.rix3 = mi->max_tp_rate[0] - MCS_GROUP_RATES; 		// left_probe()
 					retry_series.try1 = 2;
+					retry_series.rix2 = mi->max_tp_rate[0] - (MCS_GROUP_RATES - 1); 	// left_up_probe()
 					retry_series.try2 = 2;
+					retry_series.rix3 = mi->max_tp_rate[0] - MCS_GROUP_RATES; 		// left_probe()
 					retry_series.try3 = 2;
 				}
 				else if (mcs_index == 7){
 					retry_series.rix1 = mi->max_tp_rate[0];
-					retry_series.rix2 = mi->max_tp_rate[0] - (MCS_GROUP_RATES - 3);
-					retry_series.rix3 = mi->max_tp_rate[0] - MCS_GROUP_RATES;
 					retry_series.try1 = 2;
+					retry_series.rix2 = mi->max_tp_rate[0] - (MCS_GROUP_RATES - 3);
 					retry_series.try2 = 2;
+					retry_series.rix3 = mi->max_tp_rate[0] - MCS_GROUP_RATES;
 					retry_series.try3 = 2;
 				}
 				
@@ -1189,7 +1193,8 @@ minstrel_ht_set_rate(struct minstrel_priv *mp, struct minstrel_ht_sta *mi,
 	if (!mrs->retry_updated)
 		minstrel_calc_retransmit(mp, mi, index);
 
-	if (retries == -1) {
+	/*if (retries == -1) {
+		// original code
  		if (mrs->prob_ewma < MINSTREL_FRAC(20, 100) || !mrs->retry_count) {
  			ratetbl->rate[offset].count = 2;
  			ratetbl->rate[offset].count_rts = 2;
@@ -1200,11 +1205,12 @@ minstrel_ht_set_rate(struct minstrel_priv *mp, struct minstrel_ht_sta *mi,
  			ratetbl->rate[offset].count_rts = mrs->retry_count_rtscts;
  		}
  	}
- 	else {
- 		ratetbl->rate[offset].count = retries;
- 		ratetbl->rate[offset].count_cts = retries;
- 		ratetbl->rate[offset].count_rts = retries;
- 	}
+ 	else {*/
+	// Set rate count
+ 	ratetbl->rate[offset].count = retries;
+	ratetbl->rate[offset].count_cts = retries;
+ 	ratetbl->rate[offset].count_rts = retries;
+ 	//}
 
 	if (index / MCS_GROUP_RATES == MINSTREL_CCK_GROUP)
 		idx = mp->cck_rates[index % ARRAY_SIZE(mp->cck_rates)];
@@ -1225,6 +1231,7 @@ minstrel_ht_set_rate(struct minstrel_priv *mp, struct minstrel_ht_sta *mi,
 		flags |= IEEE80211_TX_RC_USE_RTS_CTS;
 	}
 
+	// Set rate index 
 	ratetbl->rate[offset].idx = idx;
 	ratetbl->rate[offset].flags = flags;
 }
@@ -1295,7 +1302,7 @@ minstrel_ht_update_rates(struct minstrel_priv *mp, struct minstrel_ht_sta *mi, s
 	rates = kzalloc(sizeof(*rates), GFP_ATOMIC);
 	if (!rates)
 		return;
-
+	// Make the rate set with which we send frames
 	/* Start with max_tp_rate[0] */
 	minstrel_ht_set_rate(mp, mi, rates, i++, retry_series.rix1, retry_series.try1);
 
@@ -1635,7 +1642,7 @@ minstrel_ht_update_caps(void *priv, struct ieee80211_supported_band *sband,
 
 		
 	// Initialize short term statistics
-	short_term_stats_reset(mi);
+	L3S_ST_stats_reset(mi);
 
 	// Initialize long term statistics
 	mi->state = true;
