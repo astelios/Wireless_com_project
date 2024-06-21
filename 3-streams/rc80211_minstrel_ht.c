@@ -741,7 +741,7 @@ void L3S_update_rate(struct minstrel_priv *mp, struct minstrel_ht_sta *mi){
 	int old_mcs_index;
 	int new_mcs_index;
 	
-	// Reset consecutive successes and failures
+	// Reset statistics successes and failures
 	L3S_ST_stats_reset(mi);
 	
 	// Return to not lose changes due to minstrel_ht_update_stats()
@@ -750,30 +750,30 @@ void L3S_update_rate(struct minstrel_priv *mp, struct minstrel_ht_sta *mi){
 	}
 
 	// Find old rate to detect if rate increase	
-	old_group 	= mi->max_tp_rate[0] / MCS_GROUP_RATES;
-	old_mcs_index	= mi->max_tp_rate[0] % MCS_GROUP_RATES;
+	old_group = mi->max_tp_rate[0] / MCS_GROUP_RATES;
+	old_mcs_index = mi->max_tp_rate[0] % MCS_GROUP_RATES;
 	
 	// tx_rate	
 	minstrel_ht_update_stats(mp, mi);
 
 	// Find new rate to detect if rate increase	
-	new_group 	= mi->max_tp_rate[0] / MCS_GROUP_RATES;
-	new_mcs_index 	= mi->max_tp_rate[0] % MCS_GROUP_RATES;
+	new_group = mi->max_tp_rate[0] / MCS_GROUP_RATES;
+	new_mcs_index = mi->max_tp_rate[0] % MCS_GROUP_RATES;
 
 	if(new_group < old_group){
 		return;
 	}
 	else if(new_group > old_group){
-		mi->probe_interval = 20; //ms
+		mi->probe_interval = 20;
 	}
 	else {
 		if(new_mcs_index > old_mcs_index){
-			mi->probe_interval = 20; //ms
+			mi->probe_interval = 20;
 		}
 	}
 }
 
-//Recovery
+// Recovery
 void L3S_recovery(struct minstrel_priv *mp, struct minstrel_ht_sta *mi){
 	int i = 0;
 	// struct MRRS_info retry_series; // JDA moved to 797 WARNING needs fix
@@ -803,7 +803,6 @@ void L3S_recovery(struct minstrel_priv *mp, struct minstrel_ht_sta *mi){
 		.try3 = 2
 	};
 
-	
 	minstrel_ht_update_rates(mp, mi, retry_series);
 }
 
@@ -829,12 +828,12 @@ void L3S_rate_statistics(struct minstrel_priv *mp, struct minstrel_ht_sta *mi){
 
 	// Consecutive Successes: 10
 	if(mi->consecutive_successes >= 10){
-		mi->probe_interval = 90; 	//ms
+		mi->probe_interval = 90;
 	}
 
 	// Consecutive Failures: 4
 	else if(mi->consecutive_failures >= 4){
-		mi->probe_interval = 10;	//ms
+		mi->probe_interval = 10;
 	}
 
 	// Consecutive Failures: 2
@@ -849,7 +848,7 @@ void L3S_rate_statistics(struct minstrel_priv *mp, struct minstrel_ht_sta *mi){
 		// Reset consecutive successes and failures, update_rate() mentioned in paper
 		L3S_update_rate(mp, mi);
 
-		mi->probe_interval = 30;	//ms
+		mi->probe_interval = 30;
 
 		return; 
 	}
@@ -937,22 +936,22 @@ minstrel_ht_tx_status(void *priv, struct ieee80211_supported_band *sband,
 	// Reseting these stats only when failures are detected since the successes 
 	// are accumulated contrary to failires, which are computed once.
 	if(!mi->consecutive_successes){
-		L3S_update_rate(mp, mi); // L3S_update_rate
+		L3S_update_rate(mp, mi);
 	}
 
 	// Enter probe state
 	current_time = ktime_to_ms(ktime_get());
 
-	// TX state and TX period just started 
+	// Tx state and Tx period just started 
 	if(mi->state && !mi->tx_timer_start){
 		mi->tx_timer_start = current_time;
 	}
 	
-	// TX state and TX period finished, thus move to Probe state	
+	// Tx state and Tx period finished, thus move to Probe state	
 	if(mi->state && (current_time - mi->tx_timer_start) > mi->probe_interval){
 		mi->state = false;			
 		
-		// Reset TX period
+		// Reset Tx period
 		mi->tx_timer_start = 0;
 	}
 	
@@ -964,16 +963,16 @@ minstrel_ht_tx_status(void *priv, struct ieee80211_supported_band *sband,
 		mi->first_probe = false;
 	}
 	
-	// Probe state and Probe period fininshed, thus move to TX state
+	// Probe state and Probe period fininshed, thus move to Tx state
 	if(!mi->state && (current_time - mi->probe_timer_start) > mi->tx_interval){	
-		// Probe state and Probe period finished, thus move to TX state
+		// Probe state and Probe period finished, thus move to Tx state
 		mi->state = true;
 
 		// Reset Probe period
 		mi->probe_timer_start = 0;	
 	}
 
-	// *********************** TX State *********************** //
+	// *********************** Tx State *********************** //
 	if(mi->state){
 
 #ifdef L3S_DEBUG
@@ -1007,7 +1006,7 @@ minstrel_ht_tx_status(void *priv, struct ieee80211_supported_band *sband,
 			if(mcs_index > 0 && mcs_index < 7){
 				retry_series.rix1 = mi->max_tp_rate[0] + 1; 	// up_probe()
 				retry_series.try1 = 2;
-				retry_series.rix2 = mi->max_tp_rate[0];	// tx_rate
+				retry_series.rix2 = mi->max_tp_rate[0];			// tx_rate
 				retry_series.try2 = 2;
 				retry_series.rix3 = mi->max_tp_rate[0] - 1; 	// down_probe()
 				retry_series.try3 = 2;
@@ -1030,7 +1029,7 @@ minstrel_ht_tx_status(void *priv, struct ieee80211_supported_band *sband,
 			}
 
 			mi->first_probe = true;
-			mi->probe_interval = 10; //ms
+			mi->probe_interval = 10;
 		}
 		
 		// Second Probe: Send adjacent groups
@@ -1041,7 +1040,7 @@ minstrel_ht_tx_status(void *priv, struct ieee80211_supported_band *sband,
 #endif
 
 			mi->first_probe = false;
-			mi->probe_interval = 60; //ms
+			mi->probe_interval = 60;
 			
 			//Find the group we are, by taking max_tp_rates[0] value
 			tx_rate = mi->max_tp_rate[0];
@@ -1106,7 +1105,6 @@ minstrel_ht_tx_status(void *priv, struct ieee80211_supported_band *sband,
 	printk("rix2: %d\n", retry_series.rix2);
 	printk("rix3: %d\n", retry_series.rix3);
 #endif
-	// ??????????????
 	if(retry_series.rix1 < 0 || retry_series.rix2 < 0 || retry_series.rix3 < 0){
 		return;
 	}
@@ -1649,10 +1647,10 @@ minstrel_ht_update_caps(void *priv, struct ieee80211_supported_band *sband,
 	// Initialize long term statistics
 	mi->state = true;
 	mi->probe_right = true;
-	mi->probe_interval 	= 60;	//ms
-	mi->tx_interval 	= 20;	//ms 
-	mi->tx_timer_start 	= 0;	//ms
-	mi->probe_timer_start 	= 0; 	//ms
+	mi->probe_interval 	= 60;
+	mi->tx_interval 	= 20;
+	mi->tx_timer_start 	= 0;
+	mi->probe_timer_start 	= 0;
 
 	return;
 
