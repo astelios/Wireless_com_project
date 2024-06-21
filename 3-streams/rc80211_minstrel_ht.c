@@ -738,8 +738,8 @@ minstrel_aggr_check(struct ieee80211_sta *pubsta, struct sk_buff *skb)
 void L3S_update_rate(struct minstrel_priv *mp, struct minstrel_ht_sta *mi){
 	int old_group;
     int new_group;
-	int old_mcs_index;
-	int new_mcs_index;
+	int old_mcs_idx;
+	int new_mcs_idx;
 	
 	// Reset statistics successes and failures
 	L3S_ST_stats_reset(mi);
@@ -751,14 +751,14 @@ void L3S_update_rate(struct minstrel_priv *mp, struct minstrel_ht_sta *mi){
 
 	// Find old rate to detect if rate increase	
 	old_group = mi->max_tp_rate[0] / MCS_GROUP_RATES;
-	old_mcs_index = mi->max_tp_rate[0] % MCS_GROUP_RATES;
+	old_mcs_idx = mi->max_tp_rate[0] % MCS_GROUP_RATES;
 	
 	// tx_rate	
 	minstrel_ht_update_stats(mp, mi);
 
 	// Find new rate to detect if rate increase	
 	new_group = mi->max_tp_rate[0] / MCS_GROUP_RATES;
-	new_mcs_index = mi->max_tp_rate[0] % MCS_GROUP_RATES;
+	new_mcs_idx = mi->max_tp_rate[0] % MCS_GROUP_RATES;
 
 	if(new_group < old_group){
 		return;
@@ -767,7 +767,7 @@ void L3S_update_rate(struct minstrel_priv *mp, struct minstrel_ht_sta *mi){
 		mi->probe_interval = 20;
 	}
 	else {
-		if(new_mcs_index > old_mcs_index){
+		if(new_mcs_idx > old_mcs_idx){
 			mi->probe_interval = 20;
 		}
 	}
@@ -871,10 +871,10 @@ minstrel_ht_tx_status(void *priv, struct ieee80211_supported_band *sband,
 	struct ieee80211_tx_rate *ar = info->status.rates;
 	struct minstrel_rate_stats *rate/*, *rate2*/;
 	struct minstrel_priv *mp = priv;
-	long long int current_time;
+	long long int curr_time;
 	struct MRRS_info retry_series;
 	bool last/*, update = false*/;	// JDA unused
-	int tx_rate, mcs_index;
+	int tx_rate, mcs_idx;
 	int i;
 
 	if (!msp->is_ht)
@@ -931,6 +931,14 @@ minstrel_ht_tx_status(void *priv, struct ieee80211_supported_band *sband,
 	}
 
 	L3S_rate_statistics(mp, mi);
+	
+
+#ifdef CUSTOM_DEBUG
+	for(i = 0; i < MAX_THR_RATES; i++){
+		printk("max_tp_rates[%d]: %d\n", i, mi->max_tp_rate[i]);
+	}
+	printk("Sucesses (%d), Failures (%d), Retries(%d)", mi->consecutive_successes, mi->consecutive_failures, mi->consecutive_retries);
+#endif
 
 	// Reset consecutive successes and failures (correspond to update_rate())
 	// Reseting these stats only when failures are detected since the successes 
@@ -940,15 +948,15 @@ minstrel_ht_tx_status(void *priv, struct ieee80211_supported_band *sband,
 	}
 
 	// Enter probe state
-	current_time = ktime_to_ms(ktime_get());
+	curr_time = ktime_to_ms(ktime_get());
 
 	// Tx state and Tx period just started 
 	if(mi->state && !mi->tx_timer_start){
-		mi->tx_timer_start = current_time;
+		mi->tx_timer_start = curr_time;
 	}
-	
+
 	// Tx state and Tx period finished, thus move to Probe state	
-	if(mi->state && (current_time - mi->tx_timer_start) > mi->probe_interval){
+	if(mi->state && (curr_time - mi->tx_timer_start) > mi->probe_interval){
 		mi->state = false;			
 		
 		// Reset Tx period
@@ -957,14 +965,14 @@ minstrel_ht_tx_status(void *priv, struct ieee80211_supported_band *sband,
 	
 	// Probe state and Probe period just started
 	if(!mi->state && !mi->probe_timer_start){
-		mi->probe_timer_start = current_time;
+		mi->probe_timer_start = curr_time;
 
 		// Probe period just started, thus first probe flag is valid
 		mi->first_probe = false;
 	}
 	
 	// Probe state and Probe period fininshed, thus move to Tx state
-	if(!mi->state && (current_time - mi->probe_timer_start) > mi->tx_interval){	
+	if(!mi->state && (curr_time - mi->probe_timer_start) > mi->tx_interval){	
 		// Probe state and Probe period finished, thus move to Tx state
 		mi->state = true;
 
@@ -999,11 +1007,10 @@ minstrel_ht_tx_status(void *priv, struct ieee80211_supported_band *sband,
 #ifdef L3S_DEBUG
 			printk("First Probe Period");
 #endif
-			
-			// MCS 
-			mcs_index = mi->max_tp_rate[0] % MCS_GROUP_RATES;
 
-			if(mcs_index > 0 && mcs_index < 7){
+			mcs_idx = mi->max_tp_rate[0] % MCS_GROUP_RATES;
+
+			if(mcs_idx > 0 && mcs_idx < 7){
 				retry_series.rix1 = mi->max_tp_rate[0] + 1; 	// up_probe()
 				retry_series.try1 = 2;
 				retry_series.rix2 = mi->max_tp_rate[0];			// tx_rate
@@ -1011,7 +1018,7 @@ minstrel_ht_tx_status(void *priv, struct ieee80211_supported_band *sband,
 				retry_series.rix3 = mi->max_tp_rate[0] - 1; 	// down_probe()
 				retry_series.try3 = 2;
 			}
-			else if(!mcs_index){
+			else if(!mcs_idx){ // 0
 				retry_series.rix1 = mi->max_tp_rate[0] + 1;
 				retry_series.try1 = 2;
 				retry_series.rix2 = mi->max_tp_rate[0];
@@ -1019,7 +1026,7 @@ minstrel_ht_tx_status(void *priv, struct ieee80211_supported_band *sband,
 				retry_series.rix3 = mi->max_tp_rate[1];
 				retry_series.try3 = 2;
 			}
-			else {
+			else { // 7
 				retry_series.rix1 = mi->max_tp_rate[0];
 				retry_series.try1 = 2;
 				retry_series.rix2 = mi->max_tp_rate[0] - 1;
@@ -1045,12 +1052,12 @@ minstrel_ht_tx_status(void *priv, struct ieee80211_supported_band *sband,
 			//Find the group we are, by taking max_tp_rates[0] value
 			tx_rate = mi->max_tp_rate[0];
 
-			//Find the mcs_index in our group
-			mcs_index = mi->max_tp_rate[0] % MCS_GROUP_RATES; 
+			//Find the mcs_idx in our group
+			mcs_idx = mi->max_tp_rate[0] % MCS_GROUP_RATES; 
 
 			// right_probe (+8) and right_down_probe (+7)
 			if ((tx_rate >= 0 && tx_rate <= 7) || (tx_rate >= 10 && tx_rate <= 17 && mi->probe_right)){
-				if (mcs_index > 0){
+				if (mcs_idx > 0){
 					retry_series.rix1 = mi->max_tp_rate[0] + MCS_GROUP_RATES; 		// right_probe()
 					retry_series.try1 = 2;
 					retry_series.rix2 = mi->max_tp_rate[0] + MCS_GROUP_RATES - 1; 	// right_down_probe()
@@ -1058,7 +1065,7 @@ minstrel_ht_tx_status(void *priv, struct ieee80211_supported_band *sband,
 					retry_series.rix3 = mi->max_tp_rate[0];				// tx_rate
 					retry_series.try3 = 2;
 				}
-				else if (!mcs_index){
+				else if (!mcs_idx){
 					retry_series.rix1 = mi->max_tp_rate[0] + MCS_GROUP_RATES; 
 					retry_series.try1 = 2;
 					retry_series.rix2 = mi->max_tp_rate[0] + MCS_GROUP_RATES - 3; 
@@ -1073,8 +1080,8 @@ minstrel_ht_tx_status(void *priv, struct ieee80211_supported_band *sband,
 			}
 
 			// left_probe (-8) and left_up_probe (-7)
-		       	else if ((tx_rate >= 20 && tx_rate <= 27) || (tx_rate >=10 && tx_rate <=17 && !mi->probe_right)){
-				if (mcs_index < 7){
+		    else if ((tx_rate >= 20 && tx_rate <= 27) || (tx_rate >=10 && tx_rate <=17 && !mi->probe_right)){
+				if (mcs_idx < 7){
 					retry_series.rix1 = mi->max_tp_rate[0];
 					retry_series.try1 = 2;
 					retry_series.rix2 = mi->max_tp_rate[0] - (MCS_GROUP_RATES - 1); 	// left_up_probe()
@@ -1082,7 +1089,7 @@ minstrel_ht_tx_status(void *priv, struct ieee80211_supported_band *sband,
 					retry_series.rix3 = mi->max_tp_rate[0] - MCS_GROUP_RATES; 		// left_probe()
 					retry_series.try3 = 2;
 				}
-				else if (mcs_index == 7){
+				else if (mcs_idx == 7){
 					retry_series.rix1 = mi->max_tp_rate[0];
 					retry_series.try1 = 2;
 					retry_series.rix2 = mi->max_tp_rate[0] - (MCS_GROUP_RATES - 3);
