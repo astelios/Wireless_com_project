@@ -684,32 +684,6 @@ minstrel_set_next_sample_idx(struct minstrel_ht_sta *mi)
 	}
 }
 
-/*
-static void
-minstrel_downgrade_rate(struct minstrel_ht_sta *mi, u16 *idx, bool primary)
-{
-	int group, orig_group;
-
-	orig_group = group = *idx / MCS_GROUP_RATES;
-	while (group > 0) {
-		group--;
-
-		if (!mi->supported[group])
-			continue;
-
-		if (minstrel_mcs_groups[group].streams >
-		    minstrel_mcs_groups[orig_group].streams)
-			continue;
-
-		if (primary)
-			*idx = mi->groups[group].max_group_tp_rate[0];
-		else
-			*idx = mi->groups[group].max_group_tp_rate[1];
-		break;
-	}
-}
-*/
-
 static void
 minstrel_aggr_check(struct ieee80211_sta *pubsta, struct sk_buff *skb)
 {
@@ -853,6 +827,7 @@ void L3S_rate_statistics(struct minstrel_priv *mp, struct minstrel_ht_sta *mi){
 		return; 
 	}
 
+	
 	// This is not mentioned in the paper. Consecutive retries are
 	// reset in order to correctly compute successes without merging
 	// the iteration of statistics (the for loop above this function
@@ -940,9 +915,6 @@ minstrel_ht_tx_status(void *priv, struct ieee80211_supported_band *sband,
 	printk("Sucesses (%d), Failures (%d), Retries(%d)", mi->consecutive_successes, mi->consecutive_failures, mi->consecutive_retries);
 #endif
 
-	// Reset consecutive successes and failures (correspond to update_rate())
-	// Reseting these stats only when failures are detected since the successes 
-	// are accumulated contrary to failires, which are computed once.
 	if(!mi->consecutive_successes){
 		L3S_update_rate(mp, mi);
 	}
