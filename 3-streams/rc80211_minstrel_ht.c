@@ -750,7 +750,7 @@ void L3S_update_rate(struct minstrel_priv *mp, struct minstrel_ht_sta *mi){
 // Recovery
 void L3S_recovery(struct minstrel_priv *mp, struct minstrel_ht_sta *mi){
 	int i = 0;
-	// struct MRRS_info retry_series; // JDA moved to 797 WARNING needs fix
+	struct MRRS_info retry_series; // JDA moved to 797 WARNING needs fix
 
 	mi->recovery = true;
 	for(i = 0; i < MAX_THR_RATES - 1; i++) {
@@ -768,14 +768,12 @@ void L3S_recovery(struct minstrel_priv *mp, struct minstrel_ht_sta *mi){
 	}
 
 	// Tries
-	struct MRRS_info retry_series = { // JDA added ", "
-		.rix1 = mi->max_tp_rate[0],
-		.rix2 = mi->max_tp_rate[1],
-		.rix3 = mi->max_tp_rate[2],
-		.try1 = 2,
-		.try2 = 2,
-		.try3 = 2
-	};
+	retry_series.rix2 = mi->max_tp_rate[1];
+	retry_series.rix3 = mi->max_tp_rate[2];
+	retry_series.rix1 = mi->max_tp_rate[0];
+	retry_series.try1 = 2;
+	retry_series.try2 = 2;
+	retry_series.try3 = 2;
 
 	minstrel_ht_update_rates(mp, mi, retry_series);
 }
