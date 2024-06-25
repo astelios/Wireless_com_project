@@ -768,9 +768,9 @@ void L3S_recovery(struct minstrel_priv *mp, struct minstrel_ht_sta *mi){
 	}
 
 	// Tries
+	retry_series.rix1 = mi->max_tp_rate[0];
 	retry_series.rix2 = mi->max_tp_rate[1];
 	retry_series.rix3 = mi->max_tp_rate[2];
-	retry_series.rix1 = mi->max_tp_rate[0];
 	retry_series.try1 = 2;
 	retry_series.try2 = 2;
 	retry_series.try3 = 2;
@@ -906,7 +906,7 @@ minstrel_ht_tx_status(void *priv, struct ieee80211_supported_band *sband,
 	L3S_rate_statistics(mp, mi);
 	
 
-#ifdef CUSTOM_DEBUG
+#ifdef L3S_DEBUG
 	for(i = 0; i < MAX_THR_RATES; i++){
 		printk("max_tp_rates[%d]: %d\n", i, mi->max_tp_rate[i]);
 	}
