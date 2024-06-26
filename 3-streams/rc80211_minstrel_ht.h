@@ -116,8 +116,8 @@ struct minstrel_ht_sta {
 	bool L3S_probe_left;	// (true, false) -> (left, right) probing direction in second probing stage
 	
 	// Timers
-	unsigned int L3S_tx_timer_start;			
-	unsigned int L3S_probe_timer_start;		
+	unsigned int L3S_tx_timer;			
+	unsigned int L3S_probe_timer;		
 };
 
 // Multi Rate Retry Series Info
