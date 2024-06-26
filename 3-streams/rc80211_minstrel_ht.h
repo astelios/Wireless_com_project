@@ -78,28 +78,6 @@ struct minstrel_ht_sta {
 	unsigned int total_packets;
 	unsigned int sample_packets;
 
-//******************************* L3S *******************************//
-	// flags
-	bool state; 	// True: TX State, False: Probe State
-	bool recovery; 	// True: Recovery was Called
-
-	// short term stats
-	unsigned int consecutive_successes;
-	unsigned int consecutive_failures;
-	unsigned int consecutive_retries;
-
-	// long term stats
-	bool first_probe; 			// True: first period, False: second period
-	bool probe_right;			// ??
-	unsigned int probe_interval;	
-	unsigned int tx_interval;	// ??
-	
-	
-	unsigned int tx_timer_start;	// Tx timer	
-	unsigned int probe_timer_start;	// Probe timer
-//******************************* L3S *******************************//
-
-
 	/* tx flags to add for frames for this sta */
 	u32 tx_flags;
 
@@ -119,12 +97,35 @@ struct minstrel_ht_sta {
 
 	/* MCS rate group info and statistics */
 	struct minstrel_mcs_group_data groups[MINSTREL_GROUPS_NB];
+
+//******************************* L3S *******************************//
+
+	// Short term stats
+	unsigned int L3S_consecutive_successes;
+	unsigned int L3S_consecutive_failures;
+	unsigned int L3S_consecutive_retries;
+
+	// State intervals
+	unsigned int L3S_tx_interval;		
+	unsigned int L3S_probe_interval;	
+	
+	// Flags
+	bool L3S_state;			// (true, false) -> (tx state, probe state)
+	bool L3S_recovery; 		// (true, false) -> (recovery called, not called)
+	bool L3S_first_probe; 	// (true, false) -> (first, second) probing stage
+	bool L3S_probe_left;	// (true, false) -> (left, right) probing direction in second probing stage
+	
+	// Timers
+	unsigned int L3S_tx_timer_start;			
+	unsigned int L3S_probe_timer_start;		
 };
 
+// Multi Rate Retry Series Info
 struct MRRS_info {
-	int try1, try2, try3;
-	int rix1, rix2, rix3;
+	int rix1, rix2, rix3; 	// Selected rates
+	int try1, try2, try3;	// Corresponding retry limits
 };
+//******************************* L3S *******************************//
 
 struct minstrel_ht_sta_priv {
 	union {

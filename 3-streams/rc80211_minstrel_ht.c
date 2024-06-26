@@ -719,7 +719,7 @@ void L3S_update_rate(struct minstrel_priv *mp, struct minstrel_ht_sta *mi){
 	L3S_ST_stats_reset(mi);
 	
 	// Return to not lose changes due to minstrel_ht_update_stats()
-	if(mi->recovery){
+	if(mi->L3S_recovery){
 		return;
 	}
 
@@ -738,24 +738,26 @@ void L3S_update_rate(struct minstrel_priv *mp, struct minstrel_ht_sta *mi){
 		return;
 	}
 	else if(new_group > old_group){
-		mi->probe_interval = 20;
+		mi->L3S_probe_interval = 20;
 	}
 	else {
 		if(new_mcs_idx > old_mcs_idx){
-			mi->probe_interval = 20;
+			mi->L3S_probe_interval = 20;
 		}
 	}
 }
 
 // Recovery
 void L3S_recovery(struct minstrel_priv *mp, struct minstrel_ht_sta *mi){
-	int i = 0;
-	struct MRRS_info retry_series; // JDA moved to 797 WARNING needs fix
+	int i;
+	struct MRRS_info retry_series; 
 
-	mi->recovery = true;
+	mi->L3S_recovery = true;
+	// Change top throuput rates
 	for(i = 0; i < MAX_THR_RATES - 1; i++) {
-		if(!(mi->max_tp_rate[i] % MCS_GROUP_RATES)){ 
-			if(!mi->max_tp_rate[i]){
+		// relative group idx == 0
+		if(!(mi->max_tp_rate[i] % MCS_GROUP_RATES)) { 
+			if(!mi->max_tp_rate[i]) {
 				mi->max_tp_rate[i] = 0;
 			}
 			else {
@@ -767,7 +769,7 @@ void L3S_recovery(struct minstrel_priv *mp, struct minstrel_ht_sta *mi){
 		}
 	}
 
-	// Tries
+	// Use new top throuput rates to update our rates
 	retry_series.rix1 = mi->max_tp_rate[0];
 	retry_series.rix2 = mi->max_tp_rate[1];
 	retry_series.rix3 = mi->max_tp_rate[2];
@@ -778,60 +780,45 @@ void L3S_recovery(struct minstrel_priv *mp, struct minstrel_ht_sta *mi){
 	minstrel_ht_update_rates(mp, mi, retry_series);
 }
 
-void L3S_ST_stats_reset(struct minstrel_ht_sta *mi){
-	mi->consecutive_successes = mi->consecutive_failures = mi->consecutive_retries = 0;
+void L3S_ST_stats_reset(struct minstrel_ht_sta *mi) {
+	mi->L3S_consecutive_successes = mi->L3S_consecutive_failures = mi->L3S_consecutive_retries = 0;
 }
 
 // Function corresponds to rate_statistics() function mentioned in the paper
 void L3S_rate_statistics(struct minstrel_priv *mp, struct minstrel_ht_sta *mi){
-	mi->recovery = false;
+	mi->L3S_recovery = false;
 
-	// At least one failed attempt was detected
-	if(mi->consecutive_retries >= 2){
-		mi->consecutive_successes = 0;
-		mi->consecutive_failures = mi->consecutive_retries - 1;
+	// Receiving ACK
+	if(mi->L3S_consecutive_retries == 1){
+		mi->L3S_consecutive_successes++;	
+		mi->L3S_consecutive_failures = 0;	
+	}
+	// Missing ACK (get all consecutive failures at once)
+	else if(mi->L3S_consecutive_retries > 1){
+		mi->L3S_consecutive_successes = 0;
+		mi->L3S_consecutive_failures = mi->L3S_consecutive_retries - 1;
 	}
 
-	// A single attempt was required to send data
-	else if(mi->consecutive_retries){
-		mi->consecutive_successes++;	
-		mi->consecutive_failures = 0;	
+	// Adjust probe interval
+	if(mi->L3S_consecutive_successes >= 10){
+		mi->L3S_probe_interval = 90;
 	}
-
-	// Consecutive Successes: 10
-	if(mi->consecutive_successes >= 10){
-		mi->probe_interval = 90;
+	else if(mi->L3S_consecutive_failures >= 4){
+		mi->L3S_probe_interval = 10;
 	}
-
-	// Consecutive Failures: 4
-	else if(mi->consecutive_failures >= 4){
-		mi->probe_interval = 10;
-	}
-
-	// Consecutive Failures: 2
-	else if(mi->consecutive_failures >= 2){
+	// Enter recovery state
+	else if(mi->L3S_consecutive_failures >= 2){
 
 #ifdef L3S_DEBUG 
-		printk("Recovery State");
+		printk("Recovery state\n");
 #endif	
-		// Fallback to previous TX Rate
 		L3S_recovery(mp, mi);
 
-		// Reset consecutive successes and failures, update_rate() mentioned in paper
+		// After recovery is called, update rate just resets the ST stats
 		L3S_update_rate(mp, mi);
 
-		mi->probe_interval = 30;
-
-		return; 
+		mi->L3S_probe_interval = 30;
 	}
-
-	
-	// This is not mentioned in the paper. Consecutive retries are
-	// reset in order to correctly compute successes without merging
-	// the iteration of statistics (the for loop above this function
-	// call) with this particular function.
-	mi->consecutive_retries = 0;
-	mi->consecutive_failures = 0;
 }
 
 static void
@@ -848,7 +835,7 @@ minstrel_ht_tx_status(void *priv, struct ieee80211_supported_band *sband,
 	struct MRRS_info retry_series;
 	bool last/*, update = false*/;	// JDA unused
 	int tx_rate, mcs_idx;
-	int i;
+	int i, j;
 
 	if (!msp->is_ht)
 		return mac80211_minstrel.tx_status_ext(priv, sband,
@@ -882,7 +869,7 @@ minstrel_ht_tx_status(void *priv, struct ieee80211_supported_band *sband,
 	last = !minstrel_ht_txstat_valid(mp, &ar[0]);
 	
 	// reset consecutive tries
-	mi->consecutive_retries = 0;
+	mi->L3S_consecutive_retries = 0;
 	for (i = 0; !last; i++) {
 		last = (i == IEEE80211_TX_MAX_RATES - 1) ||
 		       !minstrel_ht_txstat_valid(mp, &ar[i + 1]);
@@ -892,14 +879,14 @@ minstrel_ht_tx_status(void *priv, struct ieee80211_supported_band *sband,
 		if (last)
 			rate->success += info->status.ampdu_ack_len;
 
-		// Increment consecutive_retries
-		mi->consecutive_retries = mi->consecutive_retries + ar[i].count; 
 		
 		/*
 		The count field in the ieee80211_tx_rate structure represents the number of times a particular rate is attempted for a 
 		given frame transmission before moving on to the next rate in the rate set or retrying with the same rate. 
 		This is crucial for understanding and managing how transmission rates are adapted in varying conditions to optimize network performance.
 		*/
+		mi->L3S_consecutive_retries += ar[i].count; 
+
 		rate->attempts += ar[i].count * info->status.ampdu_len;
 	}
 
@@ -907,93 +894,80 @@ minstrel_ht_tx_status(void *priv, struct ieee80211_supported_band *sband,
 	
 
 #ifdef L3S_DEBUG
-	for(i = 0; i < MAX_THR_RATES; i++){
-		printk("max_tp_rates[%d]: %d\n", i, mi->max_tp_rate[i]);
+	for(j = 0; j < MAX_THR_RATES - 1; j++){
+		printk("max_tp_rate(%d) = %d\n", j, mi->max_tp_rate[i]);
 	}
-	printk("Sucesses (%d), Failures (%d), Retries(%d)", mi->consecutive_successes, mi->consecutive_failures, mi->consecutive_retries);
+	printk("retries{%d}, successes {%d}, failures {%d}\n", mi->L3S_consecutive_retries, mi->L3S_consecutive_successes, mi->L3S_consecutive_failures);
 #endif
-
-	if(!mi->consecutive_successes){
-		L3S_update_rate(mp, mi);
+	// Reset stats in case of failure (missing ack) after print
+	if(!mi->L3S_consecutive_successes){
+		L3S_ST_stats_reset(mi);
 	}
 
-	// Enter probe state
+	//******************************* State Decision *******************************//
 	curr_time = ktime_to_ms(ktime_get());
 
-	// Tx state and Tx period just started 
-	if(mi->state && !mi->tx_timer_start){
-		mi->tx_timer_start = curr_time;
+	// tx_state init
+	if(mi->L3S_state && 
+	  !mi->L3S_tx_timer) 
+	{
+		mi->L3S_tx_timer = curr_time;
 	}
 
-	// Tx state and Tx period finished, thus move to Probe state	
-	if(mi->state && (curr_time - mi->tx_timer_start) > mi->probe_interval){
-		mi->state = false;			
-		
-		// Reset Tx period
-		mi->tx_timer_start = 0;
-	}
-	
-	// Probe state and Probe period just started
-	if(!mi->state && !mi->probe_timer_start){
-		mi->probe_timer_start = curr_time;
-
-		// Probe period just started, thus first probe flag is valid
-		mi->first_probe = false;
+	// tx_state -> probe_state	
+	if(mi->L3S_state && 
+	   mi->L3S_probe_interval < (curr_time - mi->L3S_tx_timer)) 
+	{
+		mi->L3S_state = false;	// probe_state		
+		mi->L3S_tx_timer = 0;
 	}
 	
-	// Probe state and Probe period fininshed, thus move to Tx state
-	if(!mi->state && (curr_time - mi->probe_timer_start) > mi->tx_interval){	
-		// Probe state and Probe period finished, thus move to Tx state
-		mi->state = true;
-
-		// Reset Probe period
-		mi->probe_timer_start = 0;	
+	// probe_state init
+	if(!mi->L3S_state && 
+	   !mi->L3S_probe_timer) 
+	{
+		mi->L3S_probe_timer = curr_time;
+		mi->L3S_first_probe = false;
+	}
+	
+	// probe_state -> tx_state
+	if(!mi->L3S_state &&
+	    mi->L3S_tx_interval < (curr_time - mi->L3S_probe_timer)) 
+	{	
+		mi->L3S_state = true; 	// tx_state
+		mi->L3S_probe_timer = 0;	
 	}
 
-	// *********************** Tx State *********************** //
-	if(mi->state){
+	
+	//******************************* Probe *******************************//
+	if(!mi->L3S_state) {
 
 #ifdef L3S_DEBUG
-		printk("TX State\n");
-#endif
-	
-		retry_series.rix1 = mi->max_tp_rate[0]; 	// tx_rate 
-		retry_series.try1 = 2;
-		retry_series.rix2 = mi->max_tp_rate[1]; 	// down_rate()
-		retry_series.try2 = 2;
-		retry_series.rix3 = mi->max_tp_rate[2]; 	// down_rate()
-		retry_series.try3 = 2;
-	}	   
-	
-	// *********************** Probe State *********************** //
-	else if(!mi->state){
-
-#ifdef L3S_DEBUG
-		printk("Probe State");
+		printk("Probe state\n");
 #endif
 
 		// First Probe: Send at adjacent rates
-		if(!mi->first_probe){
+		if(!mi->L3S_first_probe) {
 #ifdef L3S_DEBUG
-			printk("First Probe Period");
+			printk("First probing stage\n");
 #endif
-
+			// get relative to group mcs_idx
 			mcs_idx = mi->max_tp_rate[0] % MCS_GROUP_RATES;
 
-			if(mcs_idx > 0 && mcs_idx < 7){
-				retry_series.rix1 = mi->max_tp_rate[0] + 1; 	// up_probe()
+			if(mcs_idx > 0 && mcs_idx < 7) { // general case
+				retry_series.rix1 = mi->max_tp_rate[0] + 1; 	// Up_Probe()
 				retry_series.try1 = 2;
 				retry_series.rix2 = mi->max_tp_rate[0];			// tx_rate
 				retry_series.try2 = 2;
-				retry_series.rix3 = mi->max_tp_rate[0] - 1; 	// down_probe()
+				retry_series.rix3 = mi->max_tp_rate[0] - 1; 	// Down_Probe()
 				retry_series.try3 = 2;
 			}
-			else if(!mcs_idx){ // 0
+			else if(!mcs_idx) { // 0
 				retry_series.rix1 = mi->max_tp_rate[0] + 1;
 				retry_series.try1 = 2;
 				retry_series.rix2 = mi->max_tp_rate[0];
 				retry_series.try2 = 2;
-				retry_series.rix3 = mi->max_tp_rate[1];
+				retry_series.rix3 = mi->max_tp_rate[1];			// -1 does not exist use next best rate
 				retry_series.try3 = 2;
 			}
 			else { // 7
@@ -1005,37 +979,39 @@ minstrel_ht_tx_status(void *priv, struct ieee80211_supported_band *sband,
 				retry_series.try3 = 2;
 			}
 
-			mi->first_probe = true;
-			mi->probe_interval = 10;
+			mi->L3S_first_probe = true;
+			mi->L3S_probe_interval = 10;
 		}
 		
 		// Second Probe: Send adjacent groups
 		else {
 
 #ifdef L3S_DEBUG
-			printk("Second Probe Period");
+			printk("Second probing stage\n");
 #endif
 
-			mi->first_probe = false;
-			mi->probe_interval = 60;
+			mi->L3S_first_probe = false;
+			mi->L3S_probe_interval = 60;
 			
 			//Find the group we are, by taking max_tp_rates[0] value
 			tx_rate = mi->max_tp_rate[0];
 
-			//Find the mcs_idx in our group
+			// get relative to group mcs_idx
 			mcs_idx = mi->max_tp_rate[0] % MCS_GROUP_RATES; 
 
-			// right_probe (+8) and right_down_probe (+7)
-			if ((tx_rate >= 0 && tx_rate <= 7) || (tx_rate >= 10 && tx_rate <= 17 && mi->probe_right)){
-				if (mcs_idx > 0){
-					retry_series.rix1 = mi->max_tp_rate[0] + MCS_GROUP_RATES; 		// right_probe()
+			// Probing right
+			if ((tx_rate >= 0 && tx_rate <= 7) ||  							// MCS group 0
+				(tx_rate >= 10 && tx_rate <= 17 && !mi->L3S_probe_left))	// MCS group 1
+			{
+				if (mcs_idx > 0) { // general case
+					retry_series.rix1 = mi->max_tp_rate[0] + MCS_GROUP_RATES; 		// Right_Probe()
 					retry_series.try1 = 2;
-					retry_series.rix2 = mi->max_tp_rate[0] + MCS_GROUP_RATES - 1; 	// right_down_probe()
+					retry_series.rix2 = mi->max_tp_rate[0] + MCS_GROUP_RATES - 1; 	// Right_Down_Probe()
 					retry_series.try2 = 2;
-					retry_series.rix3 = mi->max_tp_rate[0];				// tx_rate
+					retry_series.rix3 = mi->max_tp_rate[0];							// tx_rate
 					retry_series.try3 = 2;
 				}
-				else if (!mcs_idx){
+				else if (!mcs_idx) { // 0
 					retry_series.rix1 = mi->max_tp_rate[0] + MCS_GROUP_RATES; 
 					retry_series.try1 = 2;
 					retry_series.rix2 = mi->max_tp_rate[0] + MCS_GROUP_RATES - 3; 
@@ -1044,43 +1020,57 @@ minstrel_ht_tx_status(void *priv, struct ieee80211_supported_band *sband,
 					retry_series.try3 = 2;
 				}
 
-				if(tx_rate >= 10 && tx_rate <= 17){	
-					mi->probe_right = false;
+				if(tx_rate >= 10 && tx_rate <= 17) {	
+					mi->L3S_probe_left = true;
 				}
 			}
 
-			// left_probe (-8) and left_up_probe (-7)
-		    else if ((tx_rate >= 20 && tx_rate <= 27) || (tx_rate >=10 && tx_rate <=17 && !mi->probe_right)){
-				if (mcs_idx < 7){
-					retry_series.rix1 = mi->max_tp_rate[0];
+			// Probing left
+		    else if ((tx_rate >= 20 && tx_rate <= 27) || 					// MCS group 2
+					 (tx_rate >=10 && tx_rate <=17 && mi->L3S_probe_left))	// MCS group 1
+			{
+				if (mcs_idx < 7) { // general case
+					retry_series.rix1 = mi->max_tp_rate[0];							// tx_rate
 					retry_series.try1 = 2;
-					retry_series.rix2 = mi->max_tp_rate[0] - (MCS_GROUP_RATES - 1); 	// left_up_probe()
+					retry_series.rix2 = mi->max_tp_rate[0] - (MCS_GROUP_RATES - 1);	// Left_Up_Probe()
 					retry_series.try2 = 2;
-					retry_series.rix3 = mi->max_tp_rate[0] - MCS_GROUP_RATES; 		// left_probe()
+					retry_series.rix3 = mi->max_tp_rate[0] - MCS_GROUP_RATES; 		// Left_Probe()
 					retry_series.try3 = 2;
 				}
-				else if (mcs_idx == 7){
+				else if (mcs_idx == 7) {
 					retry_series.rix1 = mi->max_tp_rate[0];
 					retry_series.try1 = 2;
-					retry_series.rix2 = mi->max_tp_rate[0] - (MCS_GROUP_RATES - 3);
+					retry_series.rix2 = mi->max_tp_rate[0] - MCS_GROUP_RATES + 3;
 					retry_series.try2 = 2;
 					retry_series.rix3 = mi->max_tp_rate[0] - MCS_GROUP_RATES;
 					retry_series.try3 = 2;
 				}
 				
-				if(tx_rate >=10 && tx_rate <=17){
-					mi->probe_right = true;
+				if(tx_rate >=10 && tx_rate <=17) {
+					mi->L3S_probe_left = false;
 				}
 			}
 		}
 	}
+	//******************************* Tx *******************************//
+	else if(mi->L3S_state) {
+
+#ifdef L3S_DEBUG
+		printk("Tx state\n");
+#endif
+	
+		retry_series.rix1 = mi->max_tp_rate[0]; 	// tx_rate 
+		retry_series.try1 = 2;
+		retry_series.rix2 = mi->max_tp_rate[1]; 	// Down_Rate()
+		retry_series.try2 = 2;
+		retry_series.rix3 = mi->max_tp_rate[2]; 	// Down_Rate()
+		retry_series.try3 = 2;
+	}	   
 
 
 
 #ifdef L3S_DEBUG
-	printk("rix1: %d\n", retry_series.rix1);
-	printk("rix2: %d\n", retry_series.rix2);
-	printk("rix3: %d\n", retry_series.rix3);
+	printk("rix1: %d, rix2: %d, rix3: %d\n", retry_series.rix1, retry_series.rix2, retry_series.rix3);
 #endif
 	if(retry_series.rix1 < 0 || retry_series.rix2 < 0 || retry_series.rix3 < 0){
 		return;
@@ -1622,12 +1612,12 @@ minstrel_ht_update_caps(void *priv, struct ieee80211_supported_band *sband,
 	L3S_ST_stats_reset(mi);
 
 	// Initialize long term statistics
-	mi->state = true;
-	mi->probe_right = true;
-	mi->probe_interval 	= 60;
-	mi->tx_interval 	= 20;
-	mi->tx_timer_start 	= 0;
-	mi->probe_timer_start 	= 0;
+	mi->L3S_state = true;
+	mi->L3S_probe_left = false;
+	mi->L3S_probe_interval 	= 60;
+	mi->L3S_tx_interval = 20;
+	mi->L3S_tx_timer 	= 0;
+	mi->L3S_probe_timer 	= 0;
 
 	return;
 
