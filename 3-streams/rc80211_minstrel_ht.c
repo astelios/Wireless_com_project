@@ -788,26 +788,25 @@ void L3S_rate_statistics(struct minstrel_priv *mp, struct minstrel_ht_sta *mi){
 	mi->L3S_recovery = false;
 
 	// Receiving ACK
-	if(mi->L3S_consecutive_retries == 1){
+	if(mi->L3S_consecutive_retries == 1) {
 		mi->L3S_consecutive_successes++;	
 		mi->L3S_consecutive_failures = 0;	
 	}
 	// Missing ACK (get all consecutive failures at once)
-	else if(mi->L3S_consecutive_retries > 1){
+	else if(mi->L3S_consecutive_retries > 1) {
 		mi->L3S_consecutive_successes = 0;
 		mi->L3S_consecutive_failures = mi->L3S_consecutive_retries - 1;
 	}
 
 	// Adjust probe interval
-	if(mi->L3S_consecutive_successes >= 10){
+	if(mi->L3S_consecutive_successes >= 10) {
 		mi->L3S_probe_interval = 90;
 	}
-	else if(mi->L3S_consecutive_failures >= 4){
+	else if(mi->L3S_consecutive_failures >= 4) {
 		mi->L3S_probe_interval = 10;
 	}
 	// Enter recovery state
-	else if(mi->L3S_consecutive_failures >= 2){
-
+	else if(mi->L3S_consecutive_failures >= 2) {
 #ifdef L3S_DEBUG 
 		printk("Recovery state\n");
 #endif	
@@ -1159,8 +1158,8 @@ minstrel_ht_set_rate(struct minstrel_priv *mp, struct minstrel_ht_sta *mi,
 	if (!mrs->retry_updated)
 		minstrel_calc_retransmit(mp, mi, index);
 
-	/*if (retries == -1) {
-		// original code
+	// original code
+	if (retries == -1) {
  		if (mrs->prob_ewma < MINSTREL_FRAC(20, 100) || !mrs->retry_count) {
  			ratetbl->rate[offset].count = 2;
  			ratetbl->rate[offset].count_rts = 2;
@@ -1171,12 +1170,12 @@ minstrel_ht_set_rate(struct minstrel_priv *mp, struct minstrel_ht_sta *mi,
  			ratetbl->rate[offset].count_rts = mrs->retry_count_rtscts;
  		}
  	}
- 	else {*/
-	// Set rate count
- 	ratetbl->rate[offset].count = retries;
-	ratetbl->rate[offset].count_cts = retries;
- 	ratetbl->rate[offset].count_rts = retries;
- 	//}
+ 	else {
+		// Set rate count
+		ratetbl->rate[offset].count = retries;
+		ratetbl->rate[offset].count_cts = retries;
+		ratetbl->rate[offset].count_rts = retries;
+ 	}
 
 	if (index / MCS_GROUP_RATES == MINSTREL_CCK_GROUP)
 		idx = mp->cck_rates[index % ARRAY_SIZE(mp->cck_rates)];
@@ -1604,19 +1603,25 @@ minstrel_ht_update_caps(void *priv, struct ieee80211_supported_band *sband,
 	/* create an initial rate table with the lowest supported rates */
 	minstrel_ht_update_stats(mp, mi);
 
-	minstrel_ht_update_rates(mp, mi, retry_series);
+	// init retry_series so we use original code
+	retry_series.rix1 = mi->max_tp_rate[0];
+	retry_series.rix2 = mi->max_tp_rate[1];
+	retry_series.rix3 = mi->max_tp_rate[1];
+	retry_series.try1 = -1;
+	retry_series.try2 = -1;
+	retry_series.try3 = -1;
 
+	minstrel_ht_update_rates(mp, mi, retry_series);
 		
-	// Initialize short term statistics
+	// L3S init
 	L3S_ST_stats_reset(mi);
 
-	// Initialize long term statistics
 	mi->L3S_state = true;
 	mi->L3S_probe_left = false;
-	mi->L3S_probe_interval 	= 60;
+	mi->L3S_probe_interval = 60;
 	mi->L3S_tx_interval = 20;
-	mi->L3S_tx_timer 	= 0;
-	mi->L3S_probe_timer 	= 0;
+	mi->L3S_tx_timer = 0;
+	mi->L3S_probe_timer = 0;
 
 	return;
 
