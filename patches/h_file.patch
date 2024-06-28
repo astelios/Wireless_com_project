@@ -1,0 +1,35 @@
+31a32,35
+> //******************************* L3S *******************************//
+> #define L3S_DEBUG
+> //******************************* L3S *******************************//
+> 
+95a100,126
+> 
+> //******************************* L3S *******************************//
+> 
+> 	// Short term stats
+> 	unsigned int L3S_consecutive_successes;
+> 	unsigned int L3S_consecutive_failures;
+> 	unsigned int L3S_consecutive_retries;
+> 
+> 	// State intervals
+> 	unsigned int L3S_tx_interval;		
+> 	unsigned int L3S_probe_interval;	
+> 	
+> 	// Flags
+> 	bool L3S_state;			// (true, false) -> (tx state, probe state)
+> 	bool L3S_recovery; 		// (true, false) -> (recovery called, not called)
+> 	bool L3S_first_probe; 	// (true, false) -> (first, second) probing stage
+> 	bool L3S_probe_left;	// (true, false) -> (left, right) probing direction in second probing stage
+> 	
+> 	// Timers
+> 	unsigned int L3S_tx_timer;			
+> 	unsigned int L3S_probe_timer;		
+> };
+> 
+> // Multi Rate Retry Series Info
+> struct MRRS_info {
+> 	int rix1, rix2, rix3; 	// Selected rates
+> 	int try1, try2, try3;	// Corresponding retry limits
+96a128
+> //******************************* L3S *******************************//

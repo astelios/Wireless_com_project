@@ -1,0 +1,476 @@
+11a12
+> #include <linux/ktime.h>
+236c237,244
+< minstrel_ht_update_rates(struct minstrel_priv *mp, struct minstrel_ht_sta *mi);
+---
+> minstrel_ht_update_rates(struct minstrel_priv *mp, struct minstrel_ht_sta *mi, struct MRRS_info retry_series);
+> 
+> // Custom Functions
+> void L3S_ST_stats_reset(struct minstrel_ht_sta *mi);
+> void L3S_update_rate(struct minstrel_priv *mp, struct minstrel_ht_sta *mi);
+> void L3S_recovery(struct minstrel_priv *mp, struct minstrel_ht_sta *mi);
+> static void minstrel_ht_set_rate(struct minstrel_priv *mp, struct minstrel_ht_sta *mi,
+>                      struct ieee80211_sta_rates *ratetbl, int offset, int index, int retries);
+680,703d687
+< minstrel_downgrade_rate(struct minstrel_ht_sta *mi, u16 *idx, bool primary)
+< {
+< 	int group, orig_group;
+< 
+< 	orig_group = group = *idx / MCS_GROUP_RATES;
+< 	while (group > 0) {
+< 		group--;
+< 
+< 		if (!mi->supported[group])
+< 			continue;
+< 
+< 		if (minstrel_mcs_groups[group].streams >
+< 		    minstrel_mcs_groups[orig_group].streams)
+< 			continue;
+< 
+< 		if (primary)
+< 			*idx = mi->groups[group].max_group_tp_rate[0];
+< 		else
+< 			*idx = mi->groups[group].max_group_tp_rate[1];
+< 		break;
+< 	}
+< }
+< 
+< static void
+725a710,821
+> 
+> // Function corresponds to update_rate() function mentioned in the paper
+> void L3S_update_rate(struct minstrel_priv *mp, struct minstrel_ht_sta *mi){
+> 	int old_group;
+>     int new_group;
+> 	int old_mcs_idx;
+> 	int new_mcs_idx;
+> 	
+> 	// Reset statistics successes and failures
+> 	L3S_ST_stats_reset(mi);
+> 	
+> 	// Return to not lose changes due to minstrel_ht_update_stats()
+> 	if(mi->L3S_recovery){
+> 		return;
+> 	}
+> 
+> 	// Find old rate to detect if rate increase	
+> 	old_group = mi->max_tp_rate[0] / MCS_GROUP_RATES;
+> 	old_mcs_idx = mi->max_tp_rate[0] % MCS_GROUP_RATES;
+> 	
+> 	// tx_rate	
+> 	minstrel_ht_update_stats(mp, mi);
+> 
+> 	// Find new rate to detect if rate increase	
+> 	new_group = mi->max_tp_rate[0] / MCS_GROUP_RATES;
+> 	new_mcs_idx = mi->max_tp_rate[0] % MCS_GROUP_RATES;
+> 
+> 	if(new_group < old_group){
+> 		return;
+> 	}
+> 	else if(new_group > old_group){
+> 		mi->L3S_probe_interval = 20;
+> 	}
+> 	else {
+> 		if(new_mcs_idx > old_mcs_idx){
+> 			mi->L3S_probe_interval = 20;
+> 		}
+> 	}
+> }
+> 
+> // Recovery
+> void L3S_recovery(struct minstrel_priv *mp, struct minstrel_ht_sta *mi){
+> 	int i;
+> 	struct MRRS_info retry_series; 
+> 
+> 	mi->L3S_recovery = true;
+> 	// Change top throuput rates
+> 	for(i = 0; i < MAX_THR_RATES - 1; i++) {
+> 		// relative group idx == 0
+> 		if(!(mi->max_tp_rate[i] % MCS_GROUP_RATES)) { 
+> 			if(!mi->max_tp_rate[i]) {
+> 				mi->max_tp_rate[i] = 0;
+> 			}
+> 			else {
+> 				mi->max_tp_rate[i] = mi->max_tp_rate[i] - MCS_GROUP_RATES;
+> 			}
+> 		}	
+> 		else {
+> 			mi->max_tp_rate[i] = mi->max_tp_rate[i] - 1;
+> 		}
+> 	}
+> 
+> 	// Use new top throuput rates to update our rates
+> 	retry_series.rix1 = mi->max_tp_rate[0];
+> 	retry_series.rix2 = mi->max_tp_rate[1];
+> 	retry_series.rix3 = mi->max_tp_rate[2];
+> 	retry_series.try1 = 2;
+> 	retry_series.try2 = 2;
+> 	retry_series.try3 = 2;
+> 
+> 	minstrel_ht_update_rates(mp, mi, retry_series);
+> }
+> 
+> void L3S_ST_stats_reset(struct minstrel_ht_sta *mi) {
+> 	mi->L3S_consecutive_successes = mi->L3S_consecutive_failures = mi->L3S_consecutive_retries = 0;
+> }
+> 
+> void L3S_rate_statistics(struct minstrel_priv *mp, struct minstrel_ht_sta *mi){
+> 	mi->L3S_recovery = false;
+> 
+> 	// Receiving ACK
+> 	if(mi->L3S_consecutive_retries == 1) {
+> 		mi->L3S_consecutive_successes++;	
+> 		mi->L3S_consecutive_failures = 0;	
+> 	}
+> 	// Missing ACK (get all consecutive failures at once)
+> 	else if(mi->L3S_consecutive_retries > 1) {
+> 		mi->L3S_consecutive_successes = 0;
+> 		mi->L3S_consecutive_failures = mi->L3S_consecutive_retries - 1;
+> 	}
+> 
+> 	// Adjust probe interval
+> 	if(mi->L3S_consecutive_successes >= 10) {
+> 		mi->L3S_probe_interval = 90;
+> 	}
+> 	else if(mi->L3S_consecutive_failures >= 4) {
+> 		mi->L3S_probe_interval = 10;
+> 	}
+> 	// Enter recovery state
+> 	else if(mi->L3S_consecutive_failures >= 2) {
+> #ifdef L3S_DEBUG 
+> 		printk("Recovery state\n");
+> #endif	
+> 		L3S_recovery(mp, mi);
+> 
+> 		// After recovery is called, update rate just resets the ST stats
+> 		L3S_update_rate(mp, mi);
+> 
+> 		mi->L3S_probe_interval = 30;
+> 	}
+> }
+> 
+734c830
+< 	struct minstrel_rate_stats *rate, *rate2;
+---
+> 	struct minstrel_rate_stats *rate;
+736,737c832,836
+< 	bool last, update = false;
+< 	int i;
+---
+> 	long long int curr_time;
+> 	struct MRRS_info retry_series;
+> 	bool last;
+> 	int tx_rate, mcs_idx;
+> 	int i, j;
+768a868,870
+> 	
+> 	// reset consecutive tries
+> 	mi->L3S_consecutive_retries = 0;
+777a880,887
+> 		
+> 		/*
+> 		The count field in the ieee80211_tx_rate structure represents the number of times a particular rate is attempted for a 
+> 		given frame transmission before moving on to the next rate in the rate set or retrying with the same rate. 
+> 		This is crucial for understanding and managing how transmission rates are adapted in varying conditions to optimize network performance.
+> 		*/
+> 		mi->L3S_consecutive_retries += ar[i].count; 
+> 
+781,804c891,896
+< 	/*
+< 	 * check for sudden death of spatial multiplexing,
+< 	 * downgrade to a lower number of streams if necessary.
+< 	 */
+< 	rate = minstrel_get_ratestats(mi, mi->max_tp_rate[0]);
+< 	if (rate->attempts > 30 &&
+< 	    MINSTREL_FRAC(rate->success, rate->attempts) <
+< 	    MINSTREL_FRAC(20, 100)) {
+< 		minstrel_downgrade_rate(mi, &mi->max_tp_rate[0], true);
+< 		update = true;
+< 	}
+< 
+< 	rate2 = minstrel_get_ratestats(mi, mi->max_tp_rate[1]);
+< 	if (rate2->attempts > 30 &&
+< 	    MINSTREL_FRAC(rate2->success, rate2->attempts) <
+< 	    MINSTREL_FRAC(20, 100)) {
+< 		minstrel_downgrade_rate(mi, &mi->max_tp_rate[1], false);
+< 		update = true;
+< 	}
+< 
+< 	if (time_after(jiffies, mi->last_stats_update +
+< 				(mp->update_interval / 2 * HZ) / 1000)) {
+< 		update = true;
+< 		minstrel_ht_update_stats(mp, mi);
+---
+> 	L3S_rate_statistics(mp, mi);
+> 	
+> 
+> #ifdef L3S_DEBUG
+> 	for(j = 0; j < MAX_THR_RATES - 1; j++){
+> 		printk("max_tp_rate(%d) = %d\n", j, mi->max_tp_rate[i]);
+805a898,953
+> 	printk("retries{%d}, successes {%d}, failures {%d}\n", mi->L3S_consecutive_retries, mi->L3S_consecutive_successes, mi->L3S_consecutive_failures);
+> #endif
+> 	// Reset stats in case of failure (missing ack) after print
+> 	if(!mi->L3S_consecutive_successes){
+> 		L3S_ST_stats_reset(mi);
+> 	}
+> 
+> 	//******************************* State Decision *******************************//
+> 	curr_time = ktime_to_ms(ktime_get());
+> 
+> 	// tx_state init
+> 	if(mi->L3S_state && 
+> 	  !mi->L3S_tx_timer) 
+> 	{
+> 		mi->L3S_tx_timer = curr_time;
+> 	}
+> 
+> 	// tx_state -> probe_state	
+> 	if(mi->L3S_state && 
+> 	   mi->L3S_probe_interval < (curr_time - mi->L3S_tx_timer)) 
+> 	{
+> 		mi->L3S_state = false;	// probe_state		
+> 		mi->L3S_tx_timer = 0;
+> 	}
+> 	
+> 	// probe_state init
+> 	if(!mi->L3S_state && 
+> 	   !mi->L3S_probe_timer) 
+> 	{
+> 		mi->L3S_probe_timer = curr_time;
+> 		mi->L3S_first_probe = false;
+> 	}
+> 	
+> 	// probe_state -> tx_state
+> 	if(!mi->L3S_state &&
+> 	    mi->L3S_tx_interval < (curr_time - mi->L3S_probe_timer)) 
+> 	{	
+> 		mi->L3S_state = true; 	// tx_state
+> 		mi->L3S_probe_timer = 0;	
+> 	}
+> 
+> 	
+> 	//******************************* Probe *******************************//
+> 	if(!mi->L3S_state) {
+> 
+> #ifdef L3S_DEBUG
+> 		printk("Probe state\n");
+> #endif
+> 
+> 		// First Probe: Send at adjacent rates
+> 		if(!mi->L3S_first_probe) {
+> #ifdef L3S_DEBUG
+> 			printk("First probing stage\n");
+> #endif
+> 			// get relative to group mcs_idx
+> 			mcs_idx = mi->max_tp_rate[0] % MCS_GROUP_RATES;
+807,808c955,1080
+< 	if (update)
+< 		minstrel_ht_update_rates(mp, mi);
+---
+> 			if(mcs_idx > 0 && mcs_idx < 7) { // general case
+> 				retry_series.rix1 = mi->max_tp_rate[0] + 1; 	// Up_Probe()
+> 				retry_series.try1 = 2;
+> 				retry_series.rix2 = mi->max_tp_rate[0];			// tx_rate
+> 				retry_series.try2 = 2;
+> 				retry_series.rix3 = mi->max_tp_rate[0] - 1; 	// Down_Probe()
+> 				retry_series.try3 = 2;
+> 			}
+> 			else if(!mcs_idx) { // 0
+> 				retry_series.rix1 = mi->max_tp_rate[0] + 1;
+> 				retry_series.try1 = 2;
+> 				retry_series.rix2 = mi->max_tp_rate[0];
+> 				retry_series.try2 = 2;
+> 				retry_series.rix3 = mi->max_tp_rate[1];			// -1 does not exist use next best rate
+> 				retry_series.try3 = 2;
+> 			}
+> 			else { // 7
+> 				retry_series.rix1 = mi->max_tp_rate[0];
+> 				retry_series.try1 = 2;
+> 				retry_series.rix2 = mi->max_tp_rate[0] - 1;
+> 				retry_series.try2 = 2;
+> 				retry_series.rix3 = mi->max_tp_rate[0] - 2;
+> 				retry_series.try3 = 2;
+> 			}
+> 
+> 			mi->L3S_first_probe = true;
+> 			mi->L3S_probe_interval = 10;
+> 		}
+> 		
+> 		// Second Probe: Send adjacent groups
+> 		else {
+> 
+> #ifdef L3S_DEBUG
+> 			printk("Second probing stage\n");
+> #endif
+> 
+> 			mi->L3S_first_probe = false;
+> 			mi->L3S_probe_interval = 60;
+> 			
+> 			//Find the group we are, by taking max_tp_rates[0] value
+> 			tx_rate = mi->max_tp_rate[0];
+> 
+> 			// get relative to group mcs_idx
+> 			mcs_idx = mi->max_tp_rate[0] % MCS_GROUP_RATES; 
+> 
+> 			// Probing right
+> 			if ((tx_rate >= 0 && tx_rate <= 7) ||  							// MCS group 0
+> 				(tx_rate >= 10 && tx_rate <= 17 && !mi->L3S_probe_left))	// MCS group 1
+> 			{
+> 				if (mcs_idx > 0) { // general case
+> 					retry_series.rix1 = mi->max_tp_rate[0] + MCS_GROUP_RATES; 		// Right_Probe()
+> 					retry_series.try1 = 2;
+> 					retry_series.rix2 = mi->max_tp_rate[0] + MCS_GROUP_RATES - 1; 	// Right_Down_Probe()
+> 					retry_series.try2 = 2;
+> 					retry_series.rix3 = mi->max_tp_rate[0];							// tx_rate
+> 					retry_series.try3 = 2;
+> 				}
+> 				else if (!mcs_idx) { // 0
+> 					retry_series.rix1 = mi->max_tp_rate[0] + MCS_GROUP_RATES; 
+> 					retry_series.try1 = 2;
+> 					retry_series.rix2 = mi->max_tp_rate[0] + MCS_GROUP_RATES - 3; 
+> 					retry_series.try2 = 2;
+> 					retry_series.rix3 = mi->max_tp_rate[0];
+> 					retry_series.try3 = 2;
+> 				}
+> 
+> 				if(tx_rate >= 10 && tx_rate <= 17) {	
+> 					mi->L3S_probe_left = true;
+> 				}
+> 			}
+> 
+> 			// Probing left
+> 		    else if ((tx_rate >= 20 && tx_rate <= 27) || 					// MCS group 2
+> 					 (tx_rate >=10 && tx_rate <=17 && mi->L3S_probe_left))	// MCS group 1
+> 			{
+> 				if (mcs_idx < 7) { // general case
+> 					retry_series.rix1 = mi->max_tp_rate[0];							// tx_rate
+> 					retry_series.try1 = 2;
+> 					retry_series.rix2 = mi->max_tp_rate[0] - (MCS_GROUP_RATES - 1);	// Left_Up_Probe()
+> 					retry_series.try2 = 2;
+> 					retry_series.rix3 = mi->max_tp_rate[0] - MCS_GROUP_RATES; 		// Left_Probe()
+> 					retry_series.try3 = 2;
+> 				}
+> 				else if (mcs_idx == 7) {
+> 					retry_series.rix1 = mi->max_tp_rate[0];
+> 					retry_series.try1 = 2;
+> 					retry_series.rix2 = mi->max_tp_rate[0] - MCS_GROUP_RATES + 3;
+> 					retry_series.try2 = 2;
+> 					retry_series.rix3 = mi->max_tp_rate[0] - MCS_GROUP_RATES;
+> 					retry_series.try3 = 2;
+> 				}
+> 				
+> 				if(tx_rate >=10 && tx_rate <=17) {
+> 					mi->L3S_probe_left = false;
+> 				}
+> 			}
+> 		}
+> 	}
+> 	//******************************* Tx *******************************//
+> 	else if(mi->L3S_state) {
+> 
+> #ifdef L3S_DEBUG
+> 		printk("Tx state\n");
+> #endif
+> 	
+> 		retry_series.rix1 = mi->max_tp_rate[0]; 	// tx_rate 
+> 		retry_series.try1 = 2;
+> 		retry_series.rix2 = mi->max_tp_rate[1]; 	// Down_Rate()
+> 		retry_series.try2 = 2;
+> 		retry_series.rix3 = mi->max_tp_rate[2]; 	// Down_Rate()
+> 		retry_series.try3 = 2;
+> 	}	   
+> 
+> 
+> 
+> #ifdef L3S_DEBUG
+> 	printk("rix1: %d, rix2: %d, rix3: %d\n", retry_series.rix1, retry_series.rix2, retry_series.rix3);
+> #endif
+> 	if(retry_series.rix1 < 0 || retry_series.rix2 < 0 || retry_series.rix3 < 0){
+> 		return;
+> 	}
+> 	
+> 	if(time_after(jiffies, mi->last_stats_update + (mp->update_interval / 2 * HZ) / 1000)){
+> 		minstrel_ht_update_stats(mp, mi);
+> 	}
+> 	minstrel_ht_update_rates(mp, mi, retry_series);
+878c1150
+<                      struct ieee80211_sta_rates *ratetbl, int offset, int index)
+---
+>                      struct ieee80211_sta_rates *ratetbl, int offset, int index, int retries)
+889,897c1161,1178
+< 	if (mrs->prob_ewma < MINSTREL_FRAC(20, 100) || !mrs->retry_count) {
+< 		ratetbl->rate[offset].count = 2;
+< 		ratetbl->rate[offset].count_rts = 2;
+< 		ratetbl->rate[offset].count_cts = 2;
+< 	} else {
+< 		ratetbl->rate[offset].count = mrs->retry_count;
+< 		ratetbl->rate[offset].count_cts = mrs->retry_count;
+< 		ratetbl->rate[offset].count_rts = mrs->retry_count_rtscts;
+< 	}
+---
+> 	// original code
+> 	if (retries == -1) {
+>  		if (mrs->prob_ewma < MINSTREL_FRAC(20, 100) || !mrs->retry_count) {
+>  			ratetbl->rate[offset].count = 2;
+>  			ratetbl->rate[offset].count_rts = 2;
+>  			ratetbl->rate[offset].count_cts = 2;
+>  		} else {
+>  			ratetbl->rate[offset].count = mrs->retry_count;
+>  			ratetbl->rate[offset].count_cts = mrs->retry_count;
+>  			ratetbl->rate[offset].count_rts = mrs->retry_count_rtscts;
+>  		}
+>  	}
+>  	else {
+> 		// Set rate count
+> 		ratetbl->rate[offset].count = retries;
+> 		ratetbl->rate[offset].count_cts = retries;
+> 		ratetbl->rate[offset].count_rts = retries;
+>  	}
+917a1199
+> 	// Set rate index 
+980c1262
+< minstrel_ht_update_rates(struct minstrel_priv *mp, struct minstrel_ht_sta *mi)
+---
+> minstrel_ht_update_rates(struct minstrel_priv *mp, struct minstrel_ht_sta *mi, struct MRRS_info retry_series)
+988c1270
+< 
+---
+> 	// Make the rate set with which we send frames
+990c1272
+< 	minstrel_ht_set_rate(mp, mi, rates, i++, mi->max_tp_rate[0]);
+---
+> 	minstrel_ht_set_rate(mp, mi, rates, i++, retry_series.rix1, retry_series.try1);
+994c1276
+< 		minstrel_ht_set_rate(mp, mi, rates, i++, mi->max_tp_rate[1]);
+---
+> 		minstrel_ht_set_rate(mp, mi, rates, i++, retry_series.rix2, retry_series.try2);
+998c1280
+< 		minstrel_ht_set_rate(mp, mi, rates, i++, mi->max_prob_rate);
+---
+> 		minstrel_ht_set_rate(mp, mi, rates, i++, retry_series.rix3, retry_series.try3);
+1188a1471
+> 	struct MRRS_info retry_series;
+1322c1605,1624
+< 	minstrel_ht_update_rates(mp, mi);
+---
+> 
+> 	// init retry_series so we use original code
+> 	retry_series.rix1 = mi->max_tp_rate[0];
+> 	retry_series.rix2 = mi->max_tp_rate[1];
+> 	retry_series.rix3 = mi->max_tp_rate[1];
+> 	retry_series.try1 = -1;
+> 	retry_series.try2 = -1;
+> 	retry_series.try3 = -1;
+> 
+> 	minstrel_ht_update_rates(mp, mi, retry_series);
+> 		
+> 	// L3S init
+> 	L3S_ST_stats_reset(mi);
+> 
+> 	mi->L3S_state = true;
+> 	mi->L3S_probe_left = false;
+> 	mi->L3S_probe_interval = 60;
+> 	mi->L3S_tx_interval = 20;
+> 	mi->L3S_tx_timer = 0;
+> 	mi->L3S_probe_timer = 0;
